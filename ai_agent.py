@@ -320,11 +320,17 @@ class AIAgent:
                 role = "user" if msg["role"] == "user" else "assistant"
                 messages.append({"role": role, "content": msg["content"]})
 
+            # Detect if this is a simple conversational message — skip tools to avoid 400s
+            last_user = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
+            financial_keywords = ["price", "stock", "ticker", "market", "news", "financial",
+                                  "compare", "earnings", "revenue", "chart", "$", "%"]
+            needs_tools = any(k in last_user.lower() for k in financial_keywords)
+
             response = groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=messages,
-                tools=GROQ_TOOLS,
-                tool_choice="auto",
+                tools=GROQ_TOOLS if needs_tools else None,
+                tool_choice="auto" if needs_tools else None,
                 max_tokens=1024
             )
             msg = response.choices[0].message
