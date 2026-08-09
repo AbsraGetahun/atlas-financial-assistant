@@ -17,7 +17,7 @@ def _env(key, default=""):
 TELEGRAM_BOT_TOKEN = _env("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY     = _env("GEMINI_API_KEY")
 GROQ_API_KEY       = _env("GROQ_API_KEY")
-DATABASE_URL       = _env("DATABASE_URL", "sqlite:///atlas_finance.db")
+DB_URL             = _env("DB_URL", "sqlite:///atlas_finance.db")
 
 if GEMINI_API_KEY:
     os.environ["GOOGLE_API_KEY"] = GEMINI_API_KEY

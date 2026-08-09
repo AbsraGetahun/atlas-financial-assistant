@@ -1,12 +1,12 @@
 from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, DateTime, Boolean, Float
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from datetime import datetime
-from config import DATABASE_URL
+from config import DB_URL
 
 Base = declarative_base()
 engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
+    DB_URL,
+    connect_args={"check_same_thread": False} if "sqlite" in DB_URL else {}
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
