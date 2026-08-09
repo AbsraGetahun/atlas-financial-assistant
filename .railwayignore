@@ -1,0 +1,5 @@
+README.md
+simulator_test.py
+.env
+*.db
+__pycache__

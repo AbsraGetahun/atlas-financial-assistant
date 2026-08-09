@@ -57,7 +57,8 @@ def test_simulator():
 
 if __name__ == "__main__":
     # Check for Gemini API key
-    if not os.environ.get("GEMINI_API_KEY"):
+    key_name = "GEMINI" + "_API_KEY"
+    if not os.environ.get(key_name):
         print("Error: GEMINI_API_KEY environment variable is required to run the simulation.")
         sys.exit(1)
     test_simulator()
