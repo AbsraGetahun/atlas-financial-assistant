@@ -14,6 +14,7 @@ if os.path.exists(env_path):
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+FINNHUB_API_KEY = os.environ.get("FINNHUB_API_KEY", "")  # <-- ADD THIS
 DB_URL = os.environ.get("DB_URL", "sqlite:///atlas_finance.db")
 
 if GEMINI_API_KEY:
