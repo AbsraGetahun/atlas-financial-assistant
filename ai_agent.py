@@ -231,85 +231,63 @@ class AIAgent:
         text = re.sub(r"\{\"tickers_csv\":[^}]+\}", "", text)
         return text.strip()
 
+    def _format_price_response(self, ticker: str, data: dict) -> str:
+        """Format price data consistently."""
+        return f"📊 *{ticker}*: ${data['price']:.2f}\n\nChange: ${data['change']:+.2f} ({data['change_percent']:+.2f}%)\nHigh: ${data['day_high']:.2f}\nLow: ${data['day_low']:.2f}\nVolume: {data['volume']:,}\n\n*Live data from Finnhub* 📈"
+
     def _get_fallback_response(self, user_text: str) -> str:
         """Get a fallback response when AI services are unavailable."""
         user_lower = user_text.lower()
         user_upper = user_text.upper()
         
-        # 1. CHECK FOR STOCK TICKERS (Any ticker mentioned)
-        common_tickers = ["AAPL", "GOOGL", "MSFT", "NVDA", "TSLA", "AMZN", "META", "BTC", "ETH", "AMD", "NFLX", "JPM", "KO", "PEP", "WMT", "TGT", "HD", "LOW", "MCD", "SBUX", "NKE", "DIS", "V", "MA", "PYPL", "SQ", "COIN", "HOOD"]
+        # Check for Bitcoin
+        if "btc" in user_lower or "bitcoin" in user_lower:
+            data = FinancialClient.get_stock_price("BTC-USD")
+            if data and "error" not in data and data.get("price", 0) > 0:
+                return self._format_price_response("Bitcoin (BTC)", data)
+        
+        # Check for Ethereum
+        if "eth" in user_lower or "ethereum" in user_lower:
+            data = FinancialClient.get_stock_price("ETH-USD")
+            if data and "error" not in data and data.get("price", 0) > 0:
+                return self._format_price_response("Ethereum (ETH)", data)
+        
+        # Check for stock tickers
+        common_tickers = ["AAPL", "GOOGL", "MSFT", "NVDA", "TSLA", "AMZN", "META", "AMD", "NFLX", "JPM"]
         for ticker in common_tickers:
             if ticker in user_upper:
                 data = FinancialClient.get_stock_price(ticker)
                 if data and "error" not in data and data.get("price", 0) > 0:
-                    return f"📊 *{ticker}*: ${data['price']:.2f} ({data['change_percent']:+.2f}%)\n\nChange: ${data['change']:+.2f}\nHigh: ${data['day_high']:.2f}\nLow: ${data['day_low']:.2f}"
+                    return self._format_price_response(ticker, data)
         
-        # 2. CHECK FOR STOCK PRICE KEYWORDS
-        stock_keywords = ["price", "stock", "trading", "market", "share", "value", "worth"]
-        if any(word in user_lower for word in stock_keywords):
-            # Try to extract a ticker from the message
-            ticker_match = re.search(r'\b([A-Z]{2,5})\b', user_upper)
-            if ticker_match:
-                ticker = ticker_match.group(1)
-                if ticker not in ["I", "A", "AT", "ON", "IN", "TO", "FOR", "WITH", "FROM", "THE", "AND", "OR", "BUT", "FOR", "NOR", "YET", "SO", "AS", "BY"]:
-                    data = FinancialClient.get_stock_price(ticker)
-                    if data and "error" not in data and data.get("price", 0) > 0:
-                        return f"📊 *{ticker}*: ${data['price']:.2f} ({data['change_percent']:+.2f}%)\n\nChange: ${data['change']:+.2f}\nHigh: ${data['day_high']:.2f}\nLow: ${data['day_low']:.2f}"
-        
-        # 3. CHECK FOR WATCHLIST
+        # Check for comparison
+        if "compare" in user_lower or "vs" in user_lower:
+            return "📊 *Compare Assets*\n\nYou can compare any two assets like:\n• 'Compare Bitcoin and Ethereum'\n• 'Compare AAPL and MSFT'\n\nTry it with real tickers!"
+
+        # Watchlist
         if "watchlist" in user_lower or "watching" in user_lower:
             tickers = [item.ticker for item in self.user.watchlist]
             if tickers:
-                return f"📋 *Your Watchlist:*\n\n" + "\n".join([f"• {ticker}" for ticker in tickers]) + "\n\nTry asking about any of these stocks!"
+                return f"📋 *Your Watchlist:*\n\n" + "\n".join([f"• {ticker}" for ticker in tickers]) + "\n\nTry asking about any of these for live data!"
             return "📋 Your watchlist is empty. Add stocks by saying 'Add AAPL to my watchlist'"
 
-        # 4. CHECK FOR ROLE
+        # Role
         if "role" in user_lower or "who am i" in user_lower:
             role = self.user.role or "not set"
             return f"📝 Your current role is: *{role}*\n\nYou can update it anytime by telling me your role."
 
-        # 5. CHECK FOR ONBOARDING STATUS
-        if "onboarded" in user_lower or "profile" in user_lower:
-            status = "✅ Onboarded" if self.user.onboarded else "⏳ Not onboarded"
-            return f"📋 *Your Profile:*\n\n• Role: {self.user.role or 'Not set'}\n• Status: {status}\n• Watchlist: {len(self.user.watchlist)} stocks"
-
-        # 6. CHECK FOR ALERTS
-        if "alert" in user_lower:
-            return "🔔 *Price Alerts*\n\nYou can set alerts by saying:\n• 'Alert me if AAPL drops 5%'\n• 'Alert me if NVDA goes above $200'\n\nI'll notify you when your alerts trigger!"
-
-        # 7. CHECK FOR HELP
-        if "help" in user_lower or "what can you do" in user_lower:
-            return "🤖 *What I Can Do*\n\n• 📊 Get stock prices\n• 📈 Compare companies\n• 📄 Analyze PDFs\n• 🎙️ Transcribe voice messages\n• 🔔 Set price alerts\n• 📋 Manage watchlist\n• 🧠 Remember your preferences\n\nJust ask naturally!"
-
-        # 8. CHECK FOR COMPARISON
-        if "compare" in user_lower or "versus" in user_lower or "vs" in user_lower:
-            return "📊 *Company Comparison*\n\nI can compare companies like:\n• 'Compare Apple and Microsoft'\n• 'Compare NVDA vs AMD'\n\nTry asking with specific tickers!"
-
-        # 9. CHECK FOR GREETINGS
+        # Greetings
         greetings = ["hello", "hi", "hey", "good morning", "good afternoon", "good evening", "howdy", "greetings", "sup", "yo", "hey there"]
         if any(greet in user_lower for greet in greetings):
             name = self.user.first_name or "there"
             return f"Hello, {name}! 👋 How can I help you with your finances today?"
 
-        # 10. CHECK FOR THANKS
-        if "thanks" in user_lower or "thank you" in user_lower:
-            return "You're welcome! 😊 Let me know if you need anything else!"
-
-        # 11. CHECK FOR BYE
-        if "bye" in user_lower or "goodbye" in user_lower:
-            return "Goodbye! 👋 Have a great day!"
-
-        # 12. CHECK FOR SELF-INTRODUCTION
-        if "introduce" in user_lower or "who are you" in user_lower:
-            return "I'm Atlas! 🤖 Your AI financial analyst on Telegram. I help with stock data, document analysis, voice messages, and more!"
-
-        # 13. CHECK FOR ADD TO WATCHLIST
+        # Add to watchlist
         if "add" in user_lower and ("watchlist" in user_lower or "track" in user_lower):
             ticker_match = re.search(r'\b([A-Z]{2,5})\b', user_upper)
             if ticker_match:
                 ticker = ticker_match.group(1)
                 if ticker not in ["I", "A", "AT", "ON", "IN", "TO", "FOR", "WITH", "FROM", "THE", "AND", "OR", "BUT", "FOR", "NOR", "YET", "SO", "AS", "BY"]:
-                    # Add to watchlist
                     exists = self.db.query(WatchlistItem).filter(
                         WatchlistItem.user_id == self.user.id, 
                         WatchlistItem.ticker == ticker
@@ -321,23 +299,7 @@ class AIAgent:
                     else:
                         return f"📋 *{ticker}* is already in your watchlist!"
 
-        # 14. CHECK FOR REMOVE FROM WATCHLIST
-        if "remove" in user_lower and ("watchlist" in user_lower or "track" in user_lower):
-            ticker_match = re.search(r'\b([A-Z]{2,5})\b', user_upper)
-            if ticker_match:
-                ticker = ticker_match.group(1)
-                item = self.db.query(WatchlistItem).filter(
-                    WatchlistItem.user_id == self.user.id, 
-                    WatchlistItem.ticker == ticker
-                ).first()
-                if item:
-                    self.db.delete(item)
-                    self.db.commit()
-                    return f"✅ Removed *{ticker}* from your watchlist!"
-                else:
-                    return f"📋 *{ticker}* wasn't in your watchlist."
-
-        # 15. CHECK FOR "I AM" / ROLE SETTING
+        # "I am" role setting
         if "i am" in user_lower or "i'm" in user_lower:
             words = user_text.split()
             for i, word in enumerate(words):
@@ -350,8 +312,16 @@ class AIAgent:
                         self.db.commit()
                         return f"✅ Got it! I've set your role as *{role}*. 📝\n\nWhat would you like to know about the markets?"
 
-        # 16. DEFAULT RESPONSE - Always answer something!
-        return f"📊 I'm here to help with your financial questions!\n\nYou can ask me about:\n• Stock prices (e.g., 'What's AAPL?')\n• Your watchlist ('What's on my watchlist?')\n• Your role ('What's my role?')\n• Setting alerts ('Alert me if NVDA drops 5%')\n• Adding stocks ('Add AAPL to my watchlist')\n\nWhat would you like to know? 💬"
+        # Thanks
+        if "thanks" in user_lower or "thank you" in user_lower:
+            return "You're welcome! 😊 Let me know if you need anything else!"
+
+        # Bye
+        if "bye" in user_lower or "goodbye" in user_lower:
+            return "Goodbye! 👋 Have a great day!"
+
+        # Default
+        return f"📊 I'm here to help with your financial questions!\n\nYou can ask me about:\n• Stock prices (e.g., 'What's AAPL?')\n• Bitcoin ('What's BTC?')\n• Your watchlist ('What's on my watchlist?')\n• Your role ('What's my role?')\n• Setting alerts ('Alert me if NVDA drops 5%')\n• Adding stocks ('Add AAPL to my watchlist')\n\nWhat would you like to know? 💬"
 
     def process_message(self, user_text: str) -> str:
         # Skip option for onboarding
@@ -361,10 +331,41 @@ class AIAgent:
             return "No problem! You can update your preferences anytime. What would you like to talk about? 💬"
         
         self._save_message("user", user_text)
+        
+        # Check for REAL DATA first (for known tickers)
+        user_lower = user_text.lower()
+        user_upper = user_text.upper()
+        
+        # Bitcoin
+        if "btc" in user_lower or "bitcoin" in user_lower:
+            data = FinancialClient.get_stock_price("BTC-USD")
+            if data and "error" not in data and data.get("price", 0) > 0:
+                reply = self._format_price_response("Bitcoin (BTC)", data)
+                self._save_message("model", reply)
+                return reply
+        
+        # Ethereum
+        if "eth" in user_lower or "ethereum" in user_lower:
+            data = FinancialClient.get_stock_price("ETH-USD")
+            if data and "error" not in data and data.get("price", 0) > 0:
+                reply = self._format_price_response("Ethereum (ETH)", data)
+                self._save_message("model", reply)
+                return reply
+        
+        # Stock tickers
+        common_tickers = ["AAPL", "GOOGL", "MSFT", "NVDA", "TSLA", "AMZN", "META", "AMD", "NFLX", "JPM"]
+        for ticker in common_tickers:
+            if ticker in user_upper:
+                data = FinancialClient.get_stock_price(ticker)
+                if data and "error" not in data and data.get("price", 0) > 0:
+                    reply = self._format_price_response(ticker, data)
+                    self._save_message("model", reply)
+                    return reply
+
+        # Try AI services for other queries
         history = self._get_history()
         system = self._build_system_prompt()
 
-        # Try Gemini first, then Groq
         reply = self._call_gemini(user_text, history, system)
         if reply is None or "trouble" in reply.lower() or "try again" in reply.lower():
             reply = self._call_groq(history, system)
@@ -494,14 +495,12 @@ class AIAgent:
                 )
                 return followup.choices[0].message.content or "I've processed your request."
 
-            # FIX: Return for when there are no tool calls
             return msg.content or "I've processed your request."
 
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Groq error: {error_msg}")
             
-            # Check for specific error types
             if "429" in error_msg or "rate_limit" in error_msg.lower():
                 return "I'm currently receiving too many requests. Please wait a moment and try again. ⏳"
             elif "401" in error_msg or "api_key" in error_msg.lower():
