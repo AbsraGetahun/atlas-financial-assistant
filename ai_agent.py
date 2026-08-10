@@ -4,7 +4,7 @@ import base64
 from config import GEMINI_API_KEY, GROQ_API_KEY
 from financial_client import FinancialClient
 from sqlalchemy.orm import Session
-from database import User, WatchlistItem, MessageLog, PriceAlert  
+from database import User, WatchlistItem, MessageLog, PriceAlert
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +182,6 @@ class AIAgent:
         )
 
         if gemini_available:
-            # Try passing image as inline base64 data — works without PIL format detection
             try:
                 import google.generativeai as genai
 
@@ -225,16 +224,14 @@ class AIAgent:
     def _strip_function_calls(text: str) -> str:
         """Remove any leaked <function=...> or tool call artifacts from AI responses."""
         import re
-        # Remove <function=name>...</function> and <function=name {...}></function>
         text = re.sub(r"<function=\w+[^>]*>.*?</function>", "", text, flags=re.DOTALL)
         text = re.sub(r"<function=\w+[^>]*/>", "", text)
-        # Remove standalone JSON blobs that look like tool calls
         text = re.sub(r"\{\"ticker\":\s*\"[A-Z]+\"\}", "", text)
         text = re.sub(r"\{\"tickers_csv\":[^}]+\}", "", text)
         return text.strip()
 
     def process_message(self, user_text: str) -> str:
-        # FIX 1: Add "skip" option for onboarding
+        # Skip option for onboarding
         if not self.user.onboarded and user_text.lower() in ["skip", "later", "not now", "skip onboarding"]:
             self.user.onboarded = True
             self.db.commit()
@@ -244,6 +241,7 @@ class AIAgent:
         history = self._get_history()
         system = self._build_system_prompt()
 
+        # Try Gemini first, then Groq
         reply = self._call_gemini(user_text, history, system)
         if reply is None:
             reply = self._call_groq(history, system)
@@ -326,26 +324,25 @@ class AIAgent:
                 role = "user" if msg["role"] == "user" else "assistant"
                 messages.append({"role": role, "content": msg["content"]})
 
-            # Detect if this is a simple conversational message — skip tools to avoid 400s
+            # Detect if this needs tools
             last_user = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
             financial_keywords = ["price", "stock", "ticker", "market", "news", "financial",
                                   "compare", "earnings", "revenue", "chart", "$", "%"]
             needs_tools = any(k in last_user.lower() for k in financial_keywords)
 
-            # FIX: Only include tools and tool_choice when needed
             if needs_tools:
                 response = groq_client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
                     messages=messages,
                     tools=GROQ_TOOLS,
                     tool_choice="auto",
-                    max_tokens=1024
+                    max_tokens=512
                 )
             else:
                 response = groq_client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
                     messages=messages,
-                    max_tokens=1024
+                    max_tokens=512
                 )
 
             msg = response.choices[0].message
@@ -368,15 +365,15 @@ class AIAgent:
                 followup = groq_client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
                     messages=messages,
-                    max_tokens=1024
+                    max_tokens=512
                 )
-                return followup.choices[0].message.content
+                return followup.choices[0].message.content or "I've processed your request."
 
-            return msg.content
+            return msg.content or "I've processed your request."
 
         except Exception as e:
             logger.error(f"Groq error: {e}")
-            return None
+            return "I'm having trouble with my AI services right now. Please try again in a moment."
 
     def analyze_document(self, doc_text: str) -> str:
         prompt = (
@@ -403,7 +400,7 @@ class AIAgent:
                         {"role": "system", "content": system},
                         {"role": "user", "content": prompt}
                     ],
-                    max_tokens=2048
+                    max_tokens=1024
                 )
                 return response.choices[0].message.content
             except Exception as e:
@@ -445,7 +442,6 @@ class AIAgent:
 
         return f"Good morning, {name}! I couldn't fetch your briefing right now — check back soon."
 
-    # FIX 2: Add get_evening_summary method
     def get_evening_summary(self) -> str:
         """Generate an evening market summary for the user."""
         tickers = [item.ticker for item in self.user.watchlist]
@@ -491,12 +487,10 @@ class AIAgent:
         ])
         return f"Evening update, {name}! Here's how your watchlist performed:\n\n{summary_text}"
 
-    # FIX 3: Add check_alerts method
     def check_alerts(self) -> list:
         """Check for triggered price alerts and return notification messages."""
         triggered_messages = []
         
-        # Get user's alerts
         alerts = self.db.query(PriceAlert).filter(
             PriceAlert.user_id == self.user_id,
             PriceAlert.triggered == False
@@ -504,7 +498,6 @@ class AIAgent:
         
         for alert in alerts:
             try:
-                # Get current price
                 data = FinancialClient.get_stock_price(alert.ticker)
                 if "error" in data:
                     continue
@@ -513,7 +506,6 @@ class AIAgent:
                 triggered = False
                 message = None
                 
-                # Check condition
                 if alert.condition == "above" and current_price > alert.threshold:
                     triggered = True
                     message = f"🚨 *Price Alert*\n\n{alert.ticker} is trading above {alert.threshold} at ${current_price:.2f}\n\nChange: {data['change_percent']:+.2f}%"
@@ -521,7 +513,6 @@ class AIAgent:
                     triggered = True
                     message = f"🚨 *Price Alert*\n\n{alert.ticker} is trading below {alert.threshold} at ${current_price:.2f}\n\nChange: {data['change_percent']:+.2f}%"
                 elif alert.condition == "change_pct":
-                    # Calculate price change percentage
                     if "change_percent" in data:
                         change_pct = data["change_percent"]
                         if abs(change_pct) >= alert.threshold:
@@ -536,7 +527,6 @@ class AIAgent:
             except Exception as e:
                 logger.error(f"Alert check error for {alert.ticker}: {e}")
         
-        # Commit changes
         if triggered_messages:
             self.db.commit()
         
@@ -584,7 +574,6 @@ class AIAgent:
         try:
             if data.get("role"):
                 self.user.role = str(data["role"])
-                # If role is set, consider user onboarded
                 if not self.user.onboarded:
                     self.user.onboarded = True
             if data.get("interests"):
