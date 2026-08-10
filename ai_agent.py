@@ -230,6 +230,40 @@ class AIAgent:
         text = re.sub(r"\{\"tickers_csv\":[^}]+\}", "", text)
         return text.strip()
 
+    def _get_fallback_response(self, user_text: str) -> str:
+        """Get a fallback response when AI services are unavailable."""
+        user_lower = user_text.lower()
+        user_upper = user_text.upper()
+        
+        # Simple greetings
+        if user_lower in ["hello", "hi", "hey", "hello atlas", "hey atlas"]:
+            return "Hello! 👋 I'm Atlas, your financial analyst. How can I help you today?"
+        
+        # Stock price requests
+        common_tickers = ["AAPL", "GOOGL", "MSFT", "NVDA", "TSLA", "AMZN", "META", "BTC", "ETH"]
+        for ticker in common_tickers:
+            if ticker in user_upper:
+                data = FinancialClient.get_stock_price(ticker)
+                if data and "error" not in data and data.get("price", 0) > 0:
+                    return f"📊 *{ticker}*: ${data['price']:.2f} ({data['change_percent']:+.2f}%)\n\nChange: ${data['change']:+.2f}\nHigh: ${data['day_high']:.2f}\nLow: ${data['day_low']:.2f}"
+        
+        # General responses
+        if "price" in user_lower or "stock" in user_lower or "trading" in user_lower:
+            return "I'm currently experiencing high demand. Please try asking for a specific ticker like AAPL or NVDA. ⏳"
+        
+        if "watchlist" in user_lower:
+            tickers = [item.ticker for item in self.user.watchlist]
+            if tickers:
+                return f"📋 Your watchlist: {', '.join(tickers)}\n\nTry asking about any of these stocks!"
+            return "Your watchlist is empty. Add stocks by saying 'Add AAPL to my watchlist' 📋"
+        
+        if "role" in user_lower:
+            role = self.user.role or "not set"
+            return f"📝 You're currently set as: {role}"
+        
+        # Default fallback
+        return "I'm currently experiencing high demand. Please try again in a moment. ⏳"
+
     def process_message(self, user_text: str) -> str:
         # Skip option for onboarding
         if not self.user.onboarded and user_text.lower() in ["skip", "later", "not now", "skip onboarding"]:
@@ -243,10 +277,12 @@ class AIAgent:
 
         # Try Gemini first, then Groq
         reply = self._call_gemini(user_text, history, system)
-        if reply is None:
+        if reply is None or "trouble" in reply.lower() or "try again" in reply.lower():
             reply = self._call_groq(history, system)
-        if reply is None:
-            reply = "I'm having trouble connecting right now. Please try again in a moment."
+        
+        # If both fail, use fallback
+        if reply is None or "trouble" in reply.lower() or "try again" in reply.lower():
+            reply = self._get_fallback_response(user_text)
 
         reply = self._strip_function_calls(reply)
 
@@ -372,8 +408,18 @@ class AIAgent:
             return msg.content or "I've processed your request."
 
         except Exception as e:
-            logger.error(f"Groq error: {e}")
-            return "I'm having trouble with my AI services right now. Please try again in a moment."
+            error_msg = str(e)
+            logger.error(f"Groq error: {error_msg}")
+            
+            # Check for specific error types
+            if "429" in error_msg or "rate_limit" in error_msg.lower():
+                return "I'm currently receiving too many requests. Please wait a moment and try again. ⏳"
+            elif "401" in error_msg or "api_key" in error_msg.lower():
+                return "There's an issue with my API key. Please contact support. 🔑"
+            elif "500" in error_msg or "502" in error_msg or "503" in error_msg:
+                return "The AI service is temporarily unavailable. Please try again in a moment. 🔄"
+            else:
+                return "I'm having trouble with my AI services right now. Please try again in a moment. 💬"
 
     def analyze_document(self, doc_text: str) -> str:
         prompt = (
