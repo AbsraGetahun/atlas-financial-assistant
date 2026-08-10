@@ -1,10 +1,10 @@
-from database import User, WatchlistItem, MessageLog, PriceAlert  
+import json
 import logging
 import base64
 from config import GEMINI_API_KEY, GROQ_API_KEY
 from financial_client import FinancialClient
 from sqlalchemy.orm import Session
-from database import User, WatchlistItem, MessageLog
+from database import User, WatchlistItem, MessageLog, PriceAlert  
 
 logger = logging.getLogger(__name__)
 
