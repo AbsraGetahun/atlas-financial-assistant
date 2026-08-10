@@ -343,7 +343,7 @@ class AIAgent:
             for i, word in enumerate(words):
                 if word.lower() in ["am", "i'm", "im"] and i + 1 < len(words):
                     role = " ".join(words[i+1:])
-                    if len(role) < 30:  # Reasonable role length
+                    if len(role) < 30:
                         self.user.role = role
                         if not self.user.onboarded:
                             self.user.onboarded = True
@@ -492,7 +492,24 @@ class AIAgent:
                     messages=messages,
                     max_tokens=512
                 )
-                return followup.choices[0].message.content
+                return followup.choices[0].message.content or "I've processed your request."
+
+            # FIX: Return for when there are no tool calls
+            return msg.content or "I've processed your request."
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Groq error: {error_msg}")
+            
+            # Check for specific error types
+            if "429" in error_msg or "rate_limit" in error_msg.lower():
+                return "I'm currently receiving too many requests. Please wait a moment and try again. ⏳"
+            elif "401" in error_msg or "api_key" in error_msg.lower():
+                return "There's an issue with my API key. Please contact support. 🔑"
+            elif "500" in error_msg or "502" in error_msg or "503" in error_msg:
+                return "The AI service is temporarily unavailable. Please try again in a moment. 🔄"
+            else:
+                return "I'm having trouble with my AI services right now. Please try again in a moment. 💬"
 
     def analyze_document(self, doc_text: str) -> str:
         prompt = (
