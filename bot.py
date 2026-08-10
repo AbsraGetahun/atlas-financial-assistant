@@ -210,29 +210,39 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ── Scheduled jobs ─────────────────────────────────────────────────────────────
 
+def send_messages_sync(bot, messages):
+    """Helper to send messages synchronously with proper event loop handling."""
+    try:
+        loop = asyncio.get_running_loop()
+        # We're in an async context
+        for chat_id, text in messages:
+            asyncio.create_task(bot.send_message(chat_id=chat_id, text=text))
+    except RuntimeError:
+        # No running loop, use asyncio.run()
+        async def send_all():
+            for chat_id, text in messages:
+                await bot.send_message(chat_id=chat_id, text=text)
+        asyncio.run(send_all())
+
 def _run_for_all_users(bot, method_name: str):
     """Generic runner for morning/evening broadcast jobs."""
     db = SessionLocal()
+    messages = []
     try:
         users = db.query(User).filter(User.onboarded == True).all()
         for user in users:
             try:
                 agent = AIAgent(db, user.id)
                 msg = getattr(agent, method_name)()
-                if msg:  # Only send if there's something meaningful
-                    # Create new event loop for each message
-                    try:
-                        loop = asyncio.get_event_loop()
-                        if loop.is_running():
-                            asyncio.create_task(bot.send_message(chat_id=user.id, text=msg))
-                        else:
-                            asyncio.run(bot.send_message(chat_id=user.id, text=msg))
-                    except RuntimeError:
-                        asyncio.run(bot.send_message(chat_id=user.id, text=msg))
+                if msg:
+                    messages.append((user.id, msg))
             except Exception as e:
                 logger.error(f"Broadcast error for user {user.id}: {e}")
     finally:
         db.close()
+    
+    if messages:
+        send_messages_sync(bot, messages)
 
 
 def send_morning_briefings(bot):
@@ -246,6 +256,7 @@ def send_evening_summaries(bot):
 def check_all_alerts(bot):
     """Check price alerts for all users and fire notifications."""
     db = SessionLocal()
+    messages = []
     try:
         users = db.query(User).filter(User.onboarded == True).all()
         for user in users:
@@ -253,24 +264,20 @@ def check_all_alerts(bot):
                 agent = AIAgent(db, user.id)
                 triggered = agent.check_alerts()
                 for msg in triggered:
-                    try:
-                        loop = asyncio.get_event_loop()
-                        if loop.is_running():
-                            asyncio.create_task(bot.send_message(chat_id=user.id, text=msg))
-                        else:
-                            asyncio.run(bot.send_message(chat_id=user.id, text=msg))
-                    except RuntimeError:
-                        asyncio.run(bot.send_message(chat_id=user.id, text=msg))
+                    messages.append((user.id, msg))
             except Exception as e:
                 logger.error(f"Alert check error for user {user.id}: {e}")
     finally:
         db.close()
+    
+    if messages:
+        send_messages_sync(bot, messages)
 
 
-async def clear_webhook(app: Application):
+async def clear_webhook(bot):
     """Clear any existing webhook to avoid conflicts."""
     try:
-        await app.bot.delete_webhook(drop_pending_updates=True)
+        await bot.delete_webhook(drop_pending_updates=True)
         logger.info("Webhook cleared successfully")
     except Exception as e:
         logger.warning(f"Could not clear webhook: {e}")
@@ -285,23 +292,22 @@ def main():
         logger.error("No TELEGRAM_BOT_TOKEN set. Exiting.")
         return
 
+    # Create application
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     
-    # Clear any existing webhook to avoid conflicts
+    # Clear webhook synchronously
     try:
-        # Try to get existing loop
+        # Try to run with existing loop
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            # If loop is running, create task
-            asyncio.create_task(clear_webhook(app))
+            asyncio.create_task(clear_webhook(app.bot))
         else:
-            # Otherwise run it
-            loop.run_until_complete(clear_webhook(app))
+            loop.run_until_complete(clear_webhook(app.bot))
     except RuntimeError:
-        # No loop exists, create one
+        # No loop, create one
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(clear_webhook(app))
+        loop.run_until_complete(clear_webhook(app.bot))
         loop.close()
 
     app.add_handler(CommandHandler("start", start_command))
@@ -324,17 +330,23 @@ def main():
 
     logger.info("Atlas bot starting...")
     
+    # Create and set an event loop for the main thread
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
     try:
         app.run_polling()
     except Exception as e:
         if "Conflict" in str(e):
-            logger.error("Conflict detected! Another bot instance is running. Please stop all other instances and try again.")
-            logger.info("Attempting to clear webhook and retry...")
+            logger.error("Conflict detected! Another bot instance is running.")
+            logger.info("Attempting to clear webhook...")
             try:
-                # Try to clear webhook
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-                loop.run_until_complete(clear_webhook(app))
+                loop.run_until_complete(clear_webhook(app.bot))
                 loop.close()
                 logger.info("Webhook cleared. Please restart the bot.")
             except Exception as clear_error:
