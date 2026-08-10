@@ -252,6 +252,15 @@ def check_all_alerts(bot):
         db.close()
 
 
+async def clear_webhook(app: Application):
+    """Clear any existing webhook to avoid conflicts."""
+    try:
+        await app.bot.delete_webhook(drop_pending_updates=True)
+        logger.info("Webhook cleared successfully")
+    except Exception as e:
+        logger.warning(f"Could not clear webhook: {e}")
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
@@ -262,6 +271,16 @@ def main():
         return
 
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    
+    # Clear any existing webhook to avoid conflicts
+    try:
+        asyncio.run(clear_webhook(app))
+    except RuntimeError:
+        # If there's already an event loop running
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(clear_webhook(app))
+        loop.close()
 
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("reset", reset_command))
@@ -282,7 +301,21 @@ def main():
                       args=[app.bot], id="alert_checker")
 
     logger.info("Atlas bot starting...")
-    app.run_polling()
+    
+    try:
+        app.run_polling()
+    except Exception as e:
+        if "Conflict" in str(e):
+            logger.error("Conflict detected! Another bot instance is running. Please stop all other instances and try again.")
+            logger.info("Attempting to clear webhook and retry...")
+            try:
+                asyncio.run(clear_webhook(app))
+                logger.info("Webhook cleared. Please restart the bot.")
+            except Exception as clear_error:
+                logger.error(f"Failed to clear webhook: {clear_error}")
+        else:
+            logger.error(f"Bot failed to start: {e}")
+            raise
 
 
 if __name__ == "__main__":

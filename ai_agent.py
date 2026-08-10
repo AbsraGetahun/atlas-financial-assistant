@@ -326,13 +326,22 @@ class AIAgent:
                                   "compare", "earnings", "revenue", "chart", "$", "%"]
             needs_tools = any(k in last_user.lower() for k in financial_keywords)
 
-            response = groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=messages,
-                tools=GROQ_TOOLS if needs_tools else None,
-                tool_choice="auto" if needs_tools else None,
-                max_tokens=1024
-            )
+            # FIX: Only include tools and tool_choice when needed
+            if needs_tools:
+                response = groq_client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=messages,
+                    tools=GROQ_TOOLS,
+                    tool_choice="auto",
+                    max_tokens=1024
+                )
+            else:
+                response = groq_client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=messages,
+                    max_tokens=1024
+                )
+
             msg = response.choices[0].message
 
             if msg.tool_calls:
@@ -499,3 +508,11 @@ class AIAgent:
             self.db.commit()
         except Exception as e:
             logger.warning(f"Preference save error: {e}")
+
+    def get_evening_summary(self) -> str:
+        """Placeholder for evening summary - implement as needed"""
+        return "Evening summary feature coming soon!"
+
+    def check_alerts(self) -> list:
+        """Placeholder for alert checking - implement as needed"""
+        return []
