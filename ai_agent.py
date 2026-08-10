@@ -1,6 +1,7 @@
 import json
 import logging
 import base64
+import re
 from config import GEMINI_API_KEY, GROQ_API_KEY
 from financial_client import FinancialClient
 from sqlalchemy.orm import Session
@@ -235,34 +236,122 @@ class AIAgent:
         user_lower = user_text.lower()
         user_upper = user_text.upper()
         
-        # Simple greetings
-        if user_lower in ["hello", "hi", "hey", "hello atlas", "hey atlas"]:
-            return "Hello! 👋 I'm Atlas, your financial analyst. How can I help you today?"
-        
-        # Stock price requests
-        common_tickers = ["AAPL", "GOOGL", "MSFT", "NVDA", "TSLA", "AMZN", "META", "BTC", "ETH"]
+        # 1. CHECK FOR STOCK TICKERS (Any ticker mentioned)
+        common_tickers = ["AAPL", "GOOGL", "MSFT", "NVDA", "TSLA", "AMZN", "META", "BTC", "ETH", "AMD", "NFLX", "JPM", "KO", "PEP", "WMT", "TGT", "HD", "LOW", "MCD", "SBUX", "NKE", "DIS", "V", "MA", "PYPL", "SQ", "COIN", "HOOD"]
         for ticker in common_tickers:
             if ticker in user_upper:
                 data = FinancialClient.get_stock_price(ticker)
                 if data and "error" not in data and data.get("price", 0) > 0:
                     return f"📊 *{ticker}*: ${data['price']:.2f} ({data['change_percent']:+.2f}%)\n\nChange: ${data['change']:+.2f}\nHigh: ${data['day_high']:.2f}\nLow: ${data['day_low']:.2f}"
         
-        # General responses
-        if "price" in user_lower or "stock" in user_lower or "trading" in user_lower:
-            return "I'm currently experiencing high demand. Please try asking for a specific ticker like AAPL or NVDA. ⏳"
+        # 2. CHECK FOR STOCK PRICE KEYWORDS
+        stock_keywords = ["price", "stock", "trading", "market", "share", "value", "worth"]
+        if any(word in user_lower for word in stock_keywords):
+            # Try to extract a ticker from the message
+            ticker_match = re.search(r'\b([A-Z]{2,5})\b', user_upper)
+            if ticker_match:
+                ticker = ticker_match.group(1)
+                if ticker not in ["I", "A", "AT", "ON", "IN", "TO", "FOR", "WITH", "FROM", "THE", "AND", "OR", "BUT", "FOR", "NOR", "YET", "SO", "AS", "BY"]:
+                    data = FinancialClient.get_stock_price(ticker)
+                    if data and "error" not in data and data.get("price", 0) > 0:
+                        return f"📊 *{ticker}*: ${data['price']:.2f} ({data['change_percent']:+.2f}%)\n\nChange: ${data['change']:+.2f}\nHigh: ${data['day_high']:.2f}\nLow: ${data['day_low']:.2f}"
         
-        if "watchlist" in user_lower:
+        # 3. CHECK FOR WATCHLIST
+        if "watchlist" in user_lower or "watching" in user_lower:
             tickers = [item.ticker for item in self.user.watchlist]
             if tickers:
-                return f"📋 Your watchlist: {', '.join(tickers)}\n\nTry asking about any of these stocks!"
-            return "Your watchlist is empty. Add stocks by saying 'Add AAPL to my watchlist' 📋"
-        
-        if "role" in user_lower:
+                return f"📋 *Your Watchlist:*\n\n" + "\n".join([f"• {ticker}" for ticker in tickers]) + "\n\nTry asking about any of these stocks!"
+            return "📋 Your watchlist is empty. Add stocks by saying 'Add AAPL to my watchlist'"
+
+        # 4. CHECK FOR ROLE
+        if "role" in user_lower or "who am i" in user_lower:
             role = self.user.role or "not set"
-            return f"📝 You're currently set as: {role}"
-        
-        # Default fallback
-        return "I'm currently experiencing high demand. Please try again in a moment. ⏳"
+            return f"📝 Your current role is: *{role}*\n\nYou can update it anytime by telling me your role."
+
+        # 5. CHECK FOR ONBOARDING STATUS
+        if "onboarded" in user_lower or "profile" in user_lower:
+            status = "✅ Onboarded" if self.user.onboarded else "⏳ Not onboarded"
+            return f"📋 *Your Profile:*\n\n• Role: {self.user.role or 'Not set'}\n• Status: {status}\n• Watchlist: {len(self.user.watchlist)} stocks"
+
+        # 6. CHECK FOR ALERTS
+        if "alert" in user_lower:
+            return "🔔 *Price Alerts*\n\nYou can set alerts by saying:\n• 'Alert me if AAPL drops 5%'\n• 'Alert me if NVDA goes above $200'\n\nI'll notify you when your alerts trigger!"
+
+        # 7. CHECK FOR HELP
+        if "help" in user_lower or "what can you do" in user_lower:
+            return "🤖 *What I Can Do*\n\n• 📊 Get stock prices\n• 📈 Compare companies\n• 📄 Analyze PDFs\n• 🎙️ Transcribe voice messages\n• 🔔 Set price alerts\n• 📋 Manage watchlist\n• 🧠 Remember your preferences\n\nJust ask naturally!"
+
+        # 8. CHECK FOR COMPARISON
+        if "compare" in user_lower or "versus" in user_lower or "vs" in user_lower:
+            return "📊 *Company Comparison*\n\nI can compare companies like:\n• 'Compare Apple and Microsoft'\n• 'Compare NVDA vs AMD'\n\nTry asking with specific tickers!"
+
+        # 9. CHECK FOR GREETINGS
+        greetings = ["hello", "hi", "hey", "good morning", "good afternoon", "good evening", "howdy", "greetings", "sup", "yo", "hey there"]
+        if any(greet in user_lower for greet in greetings):
+            name = self.user.first_name or "there"
+            return f"Hello, {name}! 👋 How can I help you with your finances today?"
+
+        # 10. CHECK FOR THANKS
+        if "thanks" in user_lower or "thank you" in user_lower:
+            return "You're welcome! 😊 Let me know if you need anything else!"
+
+        # 11. CHECK FOR BYE
+        if "bye" in user_lower or "goodbye" in user_lower:
+            return "Goodbye! 👋 Have a great day!"
+
+        # 12. CHECK FOR SELF-INTRODUCTION
+        if "introduce" in user_lower or "who are you" in user_lower:
+            return "I'm Atlas! 🤖 Your AI financial analyst on Telegram. I help with stock data, document analysis, voice messages, and more!"
+
+        # 13. CHECK FOR ADD TO WATCHLIST
+        if "add" in user_lower and ("watchlist" in user_lower or "track" in user_lower):
+            ticker_match = re.search(r'\b([A-Z]{2,5})\b', user_upper)
+            if ticker_match:
+                ticker = ticker_match.group(1)
+                if ticker not in ["I", "A", "AT", "ON", "IN", "TO", "FOR", "WITH", "FROM", "THE", "AND", "OR", "BUT", "FOR", "NOR", "YET", "SO", "AS", "BY"]:
+                    # Add to watchlist
+                    exists = self.db.query(WatchlistItem).filter(
+                        WatchlistItem.user_id == self.user.id, 
+                        WatchlistItem.ticker == ticker
+                    ).first()
+                    if not exists:
+                        self.db.add(WatchlistItem(user_id=self.user.id, ticker=ticker))
+                        self.db.commit()
+                        return f"✅ Added *{ticker}* to your watchlist! 📋\n\nTry asking 'What's {ticker}?' for live data."
+                    else:
+                        return f"📋 *{ticker}* is already in your watchlist!"
+
+        # 14. CHECK FOR REMOVE FROM WATCHLIST
+        if "remove" in user_lower and ("watchlist" in user_lower or "track" in user_lower):
+            ticker_match = re.search(r'\b([A-Z]{2,5})\b', user_upper)
+            if ticker_match:
+                ticker = ticker_match.group(1)
+                item = self.db.query(WatchlistItem).filter(
+                    WatchlistItem.user_id == self.user.id, 
+                    WatchlistItem.ticker == ticker
+                ).first()
+                if item:
+                    self.db.delete(item)
+                    self.db.commit()
+                    return f"✅ Removed *{ticker}* from your watchlist!"
+                else:
+                    return f"📋 *{ticker}* wasn't in your watchlist."
+
+        # 15. CHECK FOR "I AM" / ROLE SETTING
+        if "i am" in user_lower or "i'm" in user_lower:
+            words = user_text.split()
+            for i, word in enumerate(words):
+                if word.lower() in ["am", "i'm", "im"] and i + 1 < len(words):
+                    role = " ".join(words[i+1:])
+                    if len(role) < 30:  # Reasonable role length
+                        self.user.role = role
+                        if not self.user.onboarded:
+                            self.user.onboarded = True
+                        self.db.commit()
+                        return f"✅ Got it! I've set your role as *{role}*. 📝\n\nWhat would you like to know about the markets?"
+
+        # 16. DEFAULT RESPONSE - Always answer something!
+        return f"📊 I'm here to help with your financial questions!\n\nYou can ask me about:\n• Stock prices (e.g., 'What's AAPL?')\n• Your watchlist ('What's on my watchlist?')\n• Your role ('What's my role?')\n• Setting alerts ('Alert me if NVDA drops 5%')\n• Adding stocks ('Add AAPL to my watchlist')\n\nWhat would you like to know? 💬"
 
     def process_message(self, user_text: str) -> str:
         # Skip option for onboarding
@@ -368,7 +457,7 @@ class AIAgent:
 
             if needs_tools:
                 response = groq_client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
+                    model="llama-3.1-8b-instant",
                     messages=messages,
                     tools=GROQ_TOOLS,
                     tool_choice="auto",
@@ -376,7 +465,7 @@ class AIAgent:
                 )
             else:
                 response = groq_client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
+                    model="llama-3.1-8b-instant",
                     messages=messages,
                     max_tokens=512
                 )
@@ -399,27 +488,11 @@ class AIAgent:
                         result = func(**args)
                         messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
                 followup = groq_client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
+                    model="llama-3.1-8b-instant",
                     messages=messages,
                     max_tokens=512
                 )
-                return followup.choices[0].message.content or "I've processed your request."
-
-            return msg.content or "I've processed your request."
-
-        except Exception as e:
-            error_msg = str(e)
-            logger.error(f"Groq error: {error_msg}")
-            
-            # Check for specific error types
-            if "429" in error_msg or "rate_limit" in error_msg.lower():
-                return "I'm currently receiving too many requests. Please wait a moment and try again. ⏳"
-            elif "401" in error_msg or "api_key" in error_msg.lower():
-                return "There's an issue with my API key. Please contact support. 🔑"
-            elif "500" in error_msg or "502" in error_msg or "503" in error_msg:
-                return "The AI service is temporarily unavailable. Please try again in a moment. 🔄"
-            else:
-                return "I'm having trouble with my AI services right now. Please try again in a moment. 💬"
+                return followup.choices[0].message.content
 
     def analyze_document(self, doc_text: str) -> str:
         prompt = (
@@ -441,7 +514,7 @@ class AIAgent:
         if groq_client:
             try:
                 response = groq_client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
+                    model="llama-3.1-8b-instant",
                     messages=[
                         {"role": "system", "content": system},
                         {"role": "user", "content": prompt}
@@ -478,7 +551,7 @@ class AIAgent:
         if groq_client:
             try:
                 response = groq_client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
+                    model="llama-3.1-8b-instant",
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=512
                 )
@@ -518,7 +591,7 @@ class AIAgent:
         if groq_client:
             try:
                 response = groq_client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
+                    model="llama-3.1-8b-instant",
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=512
                 )
@@ -604,7 +677,7 @@ class AIAgent:
         if not data and groq_client:
             try:
                 response = groq_client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
+                    model="llama-3.1-8b-instant",
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=256
                 )
