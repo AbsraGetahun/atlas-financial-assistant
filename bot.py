@@ -27,11 +27,17 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         agent.user.first_name = user.first_name
         agent.user.username = user.username
         db.commit()
+        # FIX 4: Updated professional welcome message
         await update.message.reply_text(
-            f"Hey {user.first_name}! I'm Atlas — your AI financial analyst.\n\n"
-            "I track stocks, analyze reports, answer market questions, and send you smart briefings. "
-            "Just talk to me like you would a colleague — no commands needed.\n\n"
-            "To get started: what's your role? Investor, analyst, founder, or something else?"
+            f"Welcome to Atlas, {user.first_name}! 👋\n\n"
+            "I'm your AI financial analyst. Here's what I can do:\n\n"
+            "📊 *Real-time Data* - Stock prices, news, financials\n"
+            "📄 *Document Analysis* - PDFs, images, charts\n"
+            "🎙️ *Voice Queries* - Just speak naturally\n"
+            "🎯 *Personalization* - Learn your preferences\n"
+            "⏰ *Proactive Alerts* - Market briefings & price alerts\n\n"
+            "What's your role? Investor, Analyst, Founder, or something else?",
+            parse_mode="Markdown"
         )
     finally:
         db.close()

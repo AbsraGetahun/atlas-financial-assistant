@@ -1,4 +1,4 @@
-import json
+from database import User, WatchlistItem, MessageLog, PriceAlert  
 import logging
 import base64
 from config import GEMINI_API_KEY, GROQ_API_KEY
@@ -234,6 +234,12 @@ class AIAgent:
         return text.strip()
 
     def process_message(self, user_text: str) -> str:
+        # FIX 1: Add "skip" option for onboarding
+        if not self.user.onboarded and user_text.lower() in ["skip", "later", "not now", "skip onboarding"]:
+            self.user.onboarded = True
+            self.db.commit()
+            return "No problem! You can update your preferences anytime. What would you like to talk about? 💬"
+        
         self._save_message("user", user_text)
         history = self._get_history()
         system = self._build_system_prompt()
@@ -439,6 +445,103 @@ class AIAgent:
 
         return f"Good morning, {name}! I couldn't fetch your briefing right now — check back soon."
 
+    # FIX 2: Add get_evening_summary method
+    def get_evening_summary(self) -> str:
+        """Generate an evening market summary for the user."""
+        tickers = [item.ticker for item in self.user.watchlist]
+        name = self.user.first_name or "there"
+        
+        if not tickers:
+            return f"Good evening, {name}! You didn't have any stocks in your watchlist today. Add some to track! 📊"
+        
+        summary = FinancialClient.get_historical_market_summary(tickers)
+        
+        if not summary:
+            return f"Evening update, {name}! I couldn't fetch data for your watchlist right now. Check back later! 📈"
+        
+        prompt = (
+            f"Write a brief evening market summary for {name}. "
+            f"Watchlist data: {json.dumps(summary)}. "
+            "Highlight key movers, what drove the changes, and one insight for tomorrow. Keep it under 150 words."
+        )
+        
+        if gemini_available:
+            try:
+                import google.generativeai as genai
+                model = genai.GenerativeModel("gemini-flash-latest")
+                return model.generate_content(prompt).text
+            except Exception:
+                pass
+        
+        if groq_client:
+            try:
+                response = groq_client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=512
+                )
+                return response.choices[0].message.content
+            except Exception as e:
+                logger.error(f"Groq evening summary error: {e}")
+        
+        # Fallback simple summary
+        summary_text = "\n".join([
+            f"• {ticker}: ${data['price']:.2f} ({data['change_percent']:+.2f}%)"
+            for ticker, data in summary.items()
+        ])
+        return f"Evening update, {name}! Here's how your watchlist performed:\n\n{summary_text}"
+
+    # FIX 3: Add check_alerts method
+    def check_alerts(self) -> list:
+        """Check for triggered price alerts and return notification messages."""
+        triggered_messages = []
+        
+        # Get user's alerts
+        alerts = self.db.query(PriceAlert).filter(
+            PriceAlert.user_id == self.user_id,
+            PriceAlert.triggered == False
+        ).all()
+        
+        for alert in alerts:
+            try:
+                # Get current price
+                data = FinancialClient.get_stock_price(alert.ticker)
+                if "error" in data:
+                    continue
+                
+                current_price = data["price"]
+                triggered = False
+                message = None
+                
+                # Check condition
+                if alert.condition == "above" and current_price > alert.threshold:
+                    triggered = True
+                    message = f"🚨 *Price Alert*\n\n{alert.ticker} is trading above {alert.threshold} at ${current_price:.2f}\n\nChange: {data['change_percent']:+.2f}%"
+                elif alert.condition == "below" and current_price < alert.threshold:
+                    triggered = True
+                    message = f"🚨 *Price Alert*\n\n{alert.ticker} is trading below {alert.threshold} at ${current_price:.2f}\n\nChange: {data['change_percent']:+.2f}%"
+                elif alert.condition == "change_pct":
+                    # Calculate price change percentage
+                    if "change_percent" in data:
+                        change_pct = data["change_percent"]
+                        if abs(change_pct) >= alert.threshold:
+                            triggered = True
+                            direction = "up" if change_pct > 0 else "down"
+                            message = f"🚨 *Price Alert*\n\n{alert.ticker} moved {direction} {abs(change_pct):.2f}% to ${current_price:.2f}\n\nChange: {change_pct:+.2f}%"
+                
+                if triggered and message:
+                    triggered_messages.append(message)
+                    alert.triggered = True
+            
+            except Exception as e:
+                logger.error(f"Alert check error for {alert.ticker}: {e}")
+        
+        # Commit changes
+        if triggered_messages:
+            self.db.commit()
+        
+        return triggered_messages
+
     def _detect_and_save_preferences(self, user_text: str, bot_response: str):
         prompt = (
             f"From this conversation turn extract user profile info as JSON.\n"
@@ -481,6 +584,9 @@ class AIAgent:
         try:
             if data.get("role"):
                 self.user.role = str(data["role"])
+                # If role is set, consider user onboarded
+                if not self.user.onboarded:
+                    self.user.onboarded = True
             if data.get("interests"):
                 val = data["interests"]
                 self.user.interests = ", ".join(val) if isinstance(val, list) else str(val)
@@ -508,11 +614,3 @@ class AIAgent:
             self.db.commit()
         except Exception as e:
             logger.warning(f"Preference save error: {e}")
-
-    def get_evening_summary(self) -> str:
-        """Placeholder for evening summary - implement as needed"""
-        return "Evening summary feature coming soon!"
-
-    def check_alerts(self) -> list:
-        """Placeholder for alert checking - implement as needed"""
-        return []
